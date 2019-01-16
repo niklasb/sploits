@@ -1,0 +1,1 @@
+KERNEL=="vboxpwn", NAME="vboxpwn", OWNER="vboxadd", MODE="0666"

@@ -1,0 +1,5 @@
+Other exploits for my bugs and those found together with saelo for Pwn2Own 2017:
+
+* https://github.com/phoenhex/files/tree/master/exploits/safari-sbx (Safari sandbox escape macOS via diskarbitrationd)
+* https://github.com/phoenhex/files/blob/master/exploits/cachedcall-uaf.html
+* https://github.com/phoenhex/files/tree/master/exploits/spread-overflow
