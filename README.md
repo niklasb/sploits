@@ -19,4 +19,4 @@ Firefox
 
 Chrome:
 
-* CVE-2018-17462 (coming soon)
+* [CVE-2018-17462](https://github.com/niklasb/hack2win-chrome) (bug by Ned Williamson, exploit by the two of us)
