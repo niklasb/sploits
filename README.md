@@ -20,3 +20,8 @@ Firefox
 Chrome:
 
 * [CVE-2018-17462](https://github.com/niklasb/hack2win-chrome) (bug by Ned Williamson, exploit by the two of us)
+
+
+## License
+
+Unless otherwise noted, the files in this repository are released under the terms specified in the `LICENSE` file.
