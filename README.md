@@ -24,4 +24,4 @@ Chrome:
 
 ## License
 
-Unless otherwise noted, the files in this repository are released under the terms specified in the `LICENSE` file.
+Unless otherwise noted, the files in this repository are released under the terms specified in the [`LICENSE`](https://github.com/niklasb/sploits/blob/master/LICENSE) file.
